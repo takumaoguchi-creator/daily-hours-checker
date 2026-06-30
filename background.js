@@ -24,7 +24,9 @@ function getJstDateParts(date = new Date()) {
   };
 }
 
-function countRemainingWeekdays(holidays, year, month, day, includeToday) {
+function countRemainingWeekdays(holidays, year, month, day, includeToday, substituteWorkDates = [], substituteHolidayDates = []) {
+  const substituteWorkSet = new Set(substituteWorkDates);
+  const substituteHolidaySet = new Set(substituteHolidayDates);
   const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
   const startDay = includeToday ? day : day + 1;
   let count = 0;
@@ -32,8 +34,11 @@ function countRemainingWeekdays(holidays, year, month, day, includeToday) {
   for (let currentDay = startDay; currentDay <= lastDay; currentDay += 1) {
     const dateStr = `${year}-${String(month).padStart(2, "0")}-${String(currentDay).padStart(2, "0")}`;
     const weekday = new Date(`${dateStr}T12:00:00+09:00`).getUTCDay();
+    const isNormalWeekday = weekday !== 0 && weekday !== 6 && !holidays[dateStr];
 
-    if (weekday !== 0 && weekday !== 6 && !holidays[dateStr]) {
+    if (substituteWorkSet.has(dateStr)) {
+      count += 1;
+    } else if (!substituteHolidaySet.has(dateStr) && isNormalWeekday) {
       count += 1;
     }
   }
@@ -50,6 +55,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     try {
       const { year, month, day } = getJstDateParts();
       const includeToday = message.includeToday === true;
+      const substituteWorkDates = Array.isArray(message.substituteWorkDates) ? message.substituteWorkDates : [];
+      const substituteHolidayDates = Array.isArray(message.substituteHolidayDates) ? message.substituteHolidayDates : [];
       const holidays = await fetchHolidaysForYear(year);
       const remainingWeekdays = countRemainingWeekdays(
         holidays,
@@ -57,6 +64,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         month,
         day,
         includeToday,
+        substituteWorkDates,
+        substituteHolidayDates,
       );
 
       sendResponse({ ok: true, remainingWeekdays, includeToday, year, month, day });

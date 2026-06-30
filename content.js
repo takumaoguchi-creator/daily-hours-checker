@@ -133,6 +133,28 @@ function getTodayAttendanceStatus() {
   };
 }
 
+function getSubstituteDates() {
+  const substituteWorkDates = [];
+  const substituteHolidayDates = [];
+
+  for (const row of document.querySelectorAll("tr[data-date]")) {
+    const date = row.dataset.date;
+    if (!date) continue;
+
+    const statusCell = row.querySelector("td:nth-child(4)");
+    if (!statusCell) continue;
+
+    const text = statusCell.textContent.trim();
+    if (text === "振替出勤") {
+      substituteWorkDates.push(date);
+    } else if (text === "振替休日") {
+      substituteHolidayDates.push(date);
+    }
+  }
+
+  return { substituteWorkDates, substituteHolidayDates };
+}
+
 function createPanel() {
   let panel = document.getElementById(PANEL_ID);
   if (panel) {
@@ -158,7 +180,7 @@ function createPanel() {
         <span class="atnd-helper-value" data-field="leftover">-</span>
       </div>
       <div class="atnd-helper-row">
-        <span class="atnd-helper-label">残り平日</span>
+        <span class="atnd-helper-label">残り労働日</span>
         <span class="atnd-helper-value" data-field="weekdays">-</span>
       </div>
       <div class="atnd-helper-row atnd-helper-result">
@@ -326,17 +348,19 @@ function waitForElement(selector, timeoutMs) {
   });
 }
 
-function getRemainingWeekdays(includeToday) {
+function getRemainingWeekdays(includeToday, substituteWorkDates, substituteHolidayDates) {
   return new Promise((resolve, reject) => {
     chrome.runtime.sendMessage(
-      { type: "GET_REMAINING_WEEKDAYS", includeToday },
+      { type: "GET_REMAINING_WEEKDAYS", includeToday, substituteWorkDates, substituteHolidayDates },
       (response) => {
         if (chrome.runtime.lastError) {
           reject(new Error(chrome.runtime.lastError.message));
           return;
         }
         if (!response?.ok) {
-          reject(new Error(response?.error ?? "残り平日の取得に失敗しました"));
+          reject(
+            new Error(response?.error ?? "残り労働日の取得に失敗しました"),
+          );
           return;
         }
         resolve(response);
@@ -359,13 +383,14 @@ async function updatePanel(panel, leftoverWorkHoursText) {
   setPanelState(panel, {
     status: "loading",
     leftover: leftoverWorkHoursText,
-    note: "残り平日を計算中...",
+    note: "残り労働日を計算中...",
   });
 
   try {
     const attendanceStatus = getTodayAttendanceStatus();
     const { includeToday, found } = attendanceStatus;
-    const { remainingWeekdays } = await getRemainingWeekdays(includeToday);
+    const { substituteWorkDates, substituteHolidayDates } = getSubstituteDates();
+    const { remainingWeekdays } = await getRemainingWeekdays(includeToday, substituteWorkDates, substituteHolidayDates);
 
     const attendanceLabel = !found
       ? "勤怠情報が見つからないため今日を含めて計算"
@@ -373,8 +398,8 @@ async function updatePanel(panel, leftoverWorkHoursText) {
         ? "今日（未退勤打刻）"
         : "今日（退勤打刻済み）";
     const weekdayNote = includeToday
-      ? `${attendanceLabel} / 今月末までの平日（祝日除外）`
-      : `${attendanceLabel} / 明日以降の平日（祝日除外）`;
+      ? `${attendanceLabel} / 今月末までの労働日`
+      : `${attendanceLabel} / 明日以降の労働日`;
 
     if (remainingWeekdays === 0) {
       setPanelState(panel, {
@@ -382,7 +407,7 @@ async function updatePanel(panel, leftoverWorkHoursText) {
         leftover: leftoverWorkHoursText,
         weekdays: 0,
         daily: "-",
-        note: "今月の残り平日がありません",
+        note: "今月の残り労働日がありません",
       });
       return;
     }
